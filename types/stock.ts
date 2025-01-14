@@ -1,6 +1,6 @@
 export interface StockData {
   symbol: string
-  name: string
+  name: string | null
   price: number
   change: number
   changePercent: number
