@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowUpIcon, ArrowDownIcon } from 'lucide-react'
+import { FINNHUB_API_KEY } from "@/lib/config"
 
 interface MarketIndex {
   name: string
@@ -20,13 +21,31 @@ export function MarketIndices() {
 
   useEffect(() => {
     const fetchIndices = async () => {
-      // Mock data - replace with actual API call
-      const mockIndices: MarketIndex[] = [
-        { name: "NASDAQ", value: 14892.45, change: 145.23, changePercent: 0.98 },
-        { name: "S&P 500", value: 4783.35, change: 32.45, changePercent: 0.68 },
-        { name: "Dow Jones", value: 37468.61, change: -23.45, changePercent: -0.06 }
-      ]
-      setIndices(mockIndices)
+      try {
+        const symbolMap = [
+          { symbol: "^IXIC", name: "NASDAQ" },
+          { symbol: "^GSPC", name: "S&P 500" },
+          { symbol: "^DJI", name: "Dow Jones" }
+        ]
+
+        const results = await Promise.all(
+          symbolMap.map(async (index) => {
+            const response = await fetch(
+              `https://finnhub.io/api/v1/quote?symbol=${index.symbol}&token=${FINNHUB_API_KEY}`
+            )
+            const data = await response.json()
+            return {
+              name: index.name,
+              value: data.c,
+              change: data.d,
+              changePercent: data.dp
+            }
+          })
+        )
+        setIndices(results)
+      } catch (error) {
+        console.error('Error fetching market indices:', error)
+      }
     }
 
     fetchIndices()
