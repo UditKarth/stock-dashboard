@@ -19,3 +19,19 @@ A real-time stock tracking dashboard built with Next.js that allows users to mon
 - Recharts for data visualization
 - Finnhub API for stock data
 - shadcn/ui components
+
+## Installation
+0. Get a free Finnhub API key from [Finnhub](https://finnhub.io/)
+1. Clone the repository
+2. Run `npm install`
+2.5 Create a `.env.local` file in the root of the project and add the following:
+```
+NEXT_PUBLIC_FINNHUB_API_KEY=<your-api-key>
+```
+3. Run `npm run dev`
+
+## Usage
+
+1. Enter a stock symbol in the search bar
+2. Select a stock from the list of results
+3. View the stock's current price, historical data, and trading recommendations
