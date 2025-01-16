@@ -11,3 +11,11 @@ A real-time stock tracking dashboard built with Next.js that allows users to mon
 - Portfolio tracking with profit/loss calculations
 - Stock search functionality
 
+## Tech Stack
+
+- Next.js 14
+- TypeScript
+- Tailwind CSS
+- Recharts for data visualization
+- Finnhub API for stock data
+- shadcn/ui components
