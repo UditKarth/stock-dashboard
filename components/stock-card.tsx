@@ -148,11 +148,11 @@ export function StockCard({ symbol, shares, purchaseDate, onRemove }: StockCardP
                     strokeWidth={2}
                   />
                   <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        formatValue={(value) => `$${Number(value).toFixed(2)}`}
-                      />
-                    }
+                    content={({ value }) => (
+                      <ChartTooltipContent>
+                        ${Number(value).toFixed(2)}
+                      </ChartTooltipContent>
+                    )}
                   />
                 </LineChart>
               </ResponsiveContainer>
