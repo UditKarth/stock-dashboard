@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import type { StockData, StockCardProps } from "@/types/stock"
 import { fetchStockData } from "@/services/stockApi"
+import { StockAnalysis } from "@/components/stock-analysis"
 
 export function StockCard({ symbol, shares, purchaseDate, onRemove }: StockCardProps) {
   const [data, setData] = useState<StockData | null>(null)
@@ -93,6 +94,8 @@ export function StockCard({ symbol, shares, purchaseDate, onRemove }: StockCardP
       </CardHeader>
       <CardContent>
         <div className="flex flex-col space-y-3">
+          <StockAnalysis stockData={data} />
+          
           <div className="flex items-center justify-between">
             <span className="text-2xl font-bold">${displayPrice.toFixed(2)}</span>
             <span
