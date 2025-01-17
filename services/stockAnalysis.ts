@@ -11,7 +11,35 @@ interface StockAnalysis {
       longTerm: number
     }
     volatility: number
+    macd?: {
+      value: number
+      signal: number
+      histogram: number
+    }
   }
+}
+
+interface MACDResult {
+  macd: number[]
+  signal: number[]
+  histogram: number[]
+}
+
+function calculateMACD(prices: number[]): MACDResult {
+  // Standard MACD uses 12, 26, and 9 day periods
+  const fastEMA = calculateEMA(prices, 12)
+  const slowEMA = calculateEMA(prices, 26)
+  
+  // Calculate MACD line
+  const macd = fastEMA.map((fast, i) => fast - slowEMA[i])
+  
+  // Calculate Signal line (9-day EMA of MACD)
+  const signal = calculateEMA(macd, 9)
+  
+  // Calculate MACD histogram
+  const histogram = macd.map((value, i) => value - signal[i])
+  
+  return { macd, signal, histogram }
 }
 
 export async function analyzeStock(stockData: StockData): Promise<StockAnalysis> {
@@ -27,8 +55,17 @@ export async function analyzeStock(stockData: StockData): Promise<StockAnalysis>
   // Calculate Volatility
   const volatility = calculateVolatility(historicalPrices)
   
+  const macdData = calculateMACD(historicalPrices)
+  
   // Generate recommendation
-  const recommendation = generateRecommendation(rsi, shortTermMA, longTermMA, volatility)
+  const recommendation = generateRecommendation(
+    rsi,
+    shortTermMA,
+    longTermMA,
+    volatility,
+    undefined,
+    historicalPrices
+  )
   
   return {
     ...recommendation,
@@ -38,7 +75,12 @@ export async function analyzeStock(stockData: StockData): Promise<StockAnalysis>
         shortTerm: shortTermMA,
         longTerm: longTermMA
       },
-      volatility
+      volatility,
+      macd: {
+        value: macdData.macd[macdData.macd.length - 1],
+        signal: macdData.signal[macdData.signal.length - 1],
+        histogram: macdData.histogram[macdData.histogram.length - 1]
+      }
     }
   }
 }
@@ -97,9 +139,25 @@ function calculateMA(prices: number[]): number {
 }
 
 function calculateVolatility(prices: number[]): number {
-  const mean = calculateMA(prices)
-  const squaredDiffs = prices.map(price => Math.pow(price - mean, 2))
-  return Math.sqrt(calculateMA(squaredDiffs))
+  // Calculate daily returns
+  const returns = prices.slice(1).map((price, i) => 
+    (price - prices[i]) / prices[i]
+  )
+  
+  // Calculate mean of returns
+  const meanReturn = returns.reduce((sum, ret) => sum + ret, 0) / returns.length
+  
+  // Calculate standard deviation of returns
+  const squaredDiffs = returns.map(ret => 
+    Math.pow(ret - meanReturn, 2)
+  )
+  const variance = squaredDiffs.reduce((sum, diff) => sum + diff, 0) / returns.length
+  const stdDev = Math.sqrt(variance)
+  
+  // Annualize the volatility (multiply by sqrt of trading days in a year)
+  const annualizedVol = stdDev * Math.sqrt(252)
+  
+  return annualizedVol
 }
 
 // Enhanced version of generateRecommendation that uses RSI trends
@@ -108,7 +166,8 @@ function generateRecommendation(
   shortTermMA: number,
   longTermMA: number,
   volatility: number,
-  historicalRSI?: number[] // Add historical RSI values
+  historicalRSI?: number[],
+  prices?: number[] // Add prices parameter for MACD
 ): Pick<StockAnalysis, 'recommendation' | 'confidence' | 'reasons'> {
   const reasons: string[] = []
   let confidence = 50
@@ -156,12 +215,12 @@ function generateRecommendation(
     confidence -= Math.min(15, Math.abs(maSpread))
   }
   
-  // Volatility Analysis with context
-  const volatilityThreshold = 0.2
+  // Volatility Analysis with more realistic thresholds
+  const volatilityThreshold = 0.20 // 20% annual volatility is typical
   if (volatility > volatilityThreshold) {
     const volatilityPercentage = ((volatility - volatilityThreshold) / volatilityThreshold) * 100
-    reasons.push(`High volatility detected (${volatilityPercentage.toFixed(2)}% above normal)`)
-    confidence -= Math.min(10, volatilityPercentage / 10)
+    reasons.push(`High volatility: ${volatility.toFixed(2)}% annually (${volatilityPercentage.toFixed(0)}% above normal)`)
+    confidence -= Math.min(15, volatilityPercentage / 20) // Reduced impact on confidence
   }
   
   // Normalize confidence between 0 and 100
@@ -174,6 +233,57 @@ function generateRecommendation(
     recommendation = 'Sell'
   } else {
     recommendation = 'Hold'
+  }
+  
+  // Add MACD analysis if we have price data
+  if (prices && prices.length >= 26) {
+    const { macd, signal, histogram } = calculateMACD(prices)
+    const currentMACD = macd[macd.length - 1]
+    const currentSignal = signal[signal.length - 1]
+    const previousHistogram = histogram[histogram.length - 2]
+    const currentHistogram = histogram[histogram.length - 1]
+
+    // MACD Crossover analysis
+    if (currentMACD > currentSignal) {
+      reasons.push('MACD above signal line (bullish)')
+      confidence += 10
+      
+      // Check if this is a recent crossover
+      if (macd[macd.length - 2] <= signal[signal.length - 2]) {
+        reasons.push('Recent MACD bullish crossover')
+        confidence += 5
+      }
+    } else {
+      reasons.push('MACD below signal line (bearish)')
+      confidence -= 10
+      
+      // Check if this is a recent crossover
+      if (macd[macd.length - 2] >= signal[signal.length - 2]) {
+        reasons.push('Recent MACD bearish crossover')
+        confidence -= 5
+      }
+    }
+
+    // MACD Histogram momentum
+    if (currentHistogram > 0 && currentHistogram > previousHistogram) {
+      reasons.push('Increasing bullish momentum')
+      confidence += 5
+    } else if (currentHistogram < 0 && currentHistogram < previousHistogram) {
+      reasons.push('Increasing bearish momentum')
+      confidence -= 5
+    }
+
+    // MACD Divergence check
+    const priceChange = prices[prices.length - 1] - prices[prices.length - 5]
+    const macdChange = currentMACD - macd[macd.length - 5]
+    
+    if (priceChange > 0 && macdChange < 0) {
+      reasons.push('Bearish divergence detected')
+      confidence -= 15
+    } else if (priceChange < 0 && macdChange > 0) {
+      reasons.push('Bullish divergence detected')
+      confidence += 15
+    }
   }
   
   return {
