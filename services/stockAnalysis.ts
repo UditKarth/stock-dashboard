@@ -16,6 +16,15 @@ interface StockAnalysis {
       signal: number
       histogram: number
     }
+    bollingerBands: {
+      upper: number
+      middle: number
+      lower: number
+    }
+    volumeProfile: {
+      volumeChange: number
+      volumeStrength: 'high' | 'normal' | 'low'
+    }
   }
 }
 
@@ -44,43 +53,48 @@ function calculateMACD(prices: number[]): MACDResult {
 
 export async function analyzeStock(stockData: StockData): Promise<StockAnalysis> {
   const historicalPrices = stockData.historicalData.map(d => d.price)
+  const historicalVolumes = stockData.historicalData.map(d => d.volume)
   
-  // Calculate RSI (Relative Strength Index)
   const rsi = calculateRSI(historicalPrices)
-  
-  // Calculate Moving Averages
-  const shortTermMA = calculateMA(historicalPrices.slice(-7)) // 7-day MA
-  const longTermMA = calculateMA(historicalPrices.slice(-30)) // 30-day MA
-  
-  // Calculate Volatility
+  const macd = calculateMACD(historicalPrices)
+  const bollingerBands = calculateBollingerBands(historicalPrices)
+  const volumeProfile = calculateVolumeProfile(historicalPrices, historicalVolumes)
+  const shortTermMA = calculateMA(historicalPrices.slice(-20)) 
+  const longTermMA = calculateMA(historicalPrices.slice(-50))
   const volatility = calculateVolatility(historicalPrices)
-  
-  const macdData = calculateMACD(historicalPrices)
-  
-  // Generate recommendation
-  const recommendation = generateRecommendation(
+
+  const currentPrice = historicalPrices[historicalPrices.length - 1]
+  const pricePosition = {
+    aboveUpperBB: currentPrice > bollingerBands.upper,
+    belowLowerBB: currentPrice < bollingerBands.lower,
+    nearMA: Math.abs(currentPrice - shortTermMA) / shortTermMA < 0.02
+  }
+
+  const recommendation = generateRecommendation({
     rsi,
+    macd,
     shortTermMA,
     longTermMA,
     volatility,
-    undefined,
-    historicalPrices
-  )
-  
+    volumeProfile,
+    pricePosition,
+    bollingerBands,
+    currentPrice
+  })
+
   return {
     ...recommendation,
     metrics: {
       rsi,
-      movingAverage: {
-        shortTerm: shortTermMA,
-        longTerm: longTermMA
-      },
+      movingAverage: { shortTerm: shortTermMA, longTerm: longTermMA },
       volatility,
       macd: {
-        value: macdData.macd[macdData.macd.length - 1],
-        signal: macdData.signal[macdData.signal.length - 1],
-        histogram: macdData.histogram[macdData.histogram.length - 1]
-      }
+        value: macd.macd[macd.macd.length - 1],
+        signal: macd.signal[macd.signal.length - 1],
+        histogram: macd.histogram[macd.histogram.length - 1]
+      },
+      bollingerBands,
+      volumeProfile
     }
   }
 }
@@ -160,70 +174,64 @@ function calculateVolatility(prices: number[]): number {
   return annualizedVol
 }
 
-// Enhanced version of generateRecommendation that uses RSI trends
-function generateRecommendation(
-  rsi: number,
-  shortTermMA: number,
-  longTermMA: number,
-  volatility: number,
-  historicalRSI?: number[],
-  prices?: number[] // Add prices parameter for MACD
-): Pick<StockAnalysis, 'recommendation' | 'confidence' | 'reasons'> {
+function generateRecommendation({
+  rsi,
+  macd,
+  shortTermMA,
+  longTermMA,
+  volatility,
+  volumeProfile,
+  pricePosition,
+  bollingerBands,
+  currentPrice
+}: {
+  rsi: number
+  macd: MACDResult
+  shortTermMA: number
+  longTermMA: number
+  volatility: number
+  volumeProfile: { volumeChange: number; volumeStrength: string }
+  pricePosition: { aboveUpperBB: boolean; belowLowerBB: boolean; nearMA: boolean }
+  bollingerBands: { upper: number; middle: number; lower: number }
+  currentPrice: number
+}): Pick<StockAnalysis, 'recommendation' | 'confidence' | 'reasons'> {
   const reasons: string[] = []
   let confidence = 50
-  
-  // RSI Analysis with trend
+
+  // RSI Analysis
   if (rsi > 70) {
     reasons.push('RSI indicates overbought conditions')
     confidence -= 20
-    
-    // Check if RSI is falling from overbought
-    if (historicalRSI && historicalRSI[historicalRSI.length - 2] > rsi) {
-      reasons.push('RSI showing bearish divergence')
-      confidence -= 10
-    }
   } else if (rsi < 30) {
     reasons.push('RSI indicates oversold conditions')
     confidence += 20
-    
-    // Check if RSI is rising from oversold
-    if (historicalRSI && historicalRSI[historicalRSI.length - 2] < rsi) {
-      reasons.push('RSI showing bullish convergence')
-      confidence += 10
-    }
   }
   
-  // RSI trend analysis
-  if (historicalRSI && historicalRSI.length >= 3) {
-    const rsiTrend = calculateRSITrend(historicalRSI.slice(-3))
-    if (rsiTrend === 'rising') {
-      reasons.push('RSI showing upward momentum')
-      confidence += 5
-    } else if (rsiTrend === 'falling') {
-      reasons.push('RSI showing downward momentum')
-      confidence -= 5
-    }
-  }
-  
-  // Moving Average Analysis with confirmation
+  // Moving Average Analysis
   const maSpread = ((shortTermMA - longTermMA) / longTermMA) * 100
   if (shortTermMA > longTermMA) {
     reasons.push(`Short-term trend is bullish (${maSpread.toFixed(2)}% above long-term MA)`)
-    confidence += Math.min(15, maSpread) // Cap the confidence boost
+    confidence += Math.min(15, maSpread)
   } else {
     reasons.push(`Short-term trend is bearish (${Math.abs(maSpread).toFixed(2)}% below long-term MA)`)
     confidence -= Math.min(15, Math.abs(maSpread))
   }
-  
-  // Volatility Analysis with more realistic thresholds
-  const volatilityThreshold = 0.20 // 20% annual volatility is typical
-  if (volatility > volatilityThreshold) {
-    const volatilityPercentage = ((volatility - volatilityThreshold) / volatilityThreshold) * 100
-    reasons.push(`High volatility: ${volatility.toFixed(2)}% annually (${volatilityPercentage.toFixed(0)}% above normal)`)
-    confidence -= Math.min(15, volatilityPercentage / 20) // Reduced impact on confidence
+
+  // MACD Analysis
+  const currentMACD = macd.macd[macd.macd.length - 1]
+  const currentSignal = macd.signal[macd.signal.length - 1]
+  const previousHistogram = macd.histogram[macd.histogram.length - 2]
+  const currentHistogram = macd.histogram[macd.histogram.length - 1]
+
+  if (currentMACD > currentSignal) {
+    reasons.push('MACD above signal line (bullish)')
+    confidence += 10
+  } else {
+    reasons.push('MACD below signal line (bearish)')
+    confidence -= 10
   }
-  
-  // Normalize confidence between 0 and 100
+
+  // Normalize confidence
   confidence = Math.max(0, Math.min(100, confidence))
   
   let recommendation: StockAnalysis['recommendation']
@@ -234,66 +242,39 @@ function generateRecommendation(
   } else {
     recommendation = 'Hold'
   }
-  
-  // Add MACD analysis if we have price data
-  if (prices && prices.length >= 26) {
-    const { macd, signal, histogram } = calculateMACD(prices)
-    const currentMACD = macd[macd.length - 1]
-    const currentSignal = signal[signal.length - 1]
-    const previousHistogram = histogram[histogram.length - 2]
-    const currentHistogram = histogram[histogram.length - 1]
 
-    // MACD Crossover analysis
-    if (currentMACD > currentSignal) {
-      reasons.push('MACD above signal line (bullish)')
-      confidence += 10
-      
-      // Check if this is a recent crossover
-      if (macd[macd.length - 2] <= signal[signal.length - 2]) {
-        reasons.push('Recent MACD bullish crossover')
-        confidence += 5
-      }
-    } else {
-      reasons.push('MACD below signal line (bearish)')
-      confidence -= 10
-      
-      // Check if this is a recent crossover
-      if (macd[macd.length - 2] >= signal[signal.length - 2]) {
-        reasons.push('Recent MACD bearish crossover')
-        confidence -= 5
-      }
-    }
+  return { recommendation, confidence, reasons }
+}
 
-    // MACD Histogram momentum
-    if (currentHistogram > 0 && currentHistogram > previousHistogram) {
-      reasons.push('Increasing bullish momentum')
-      confidence += 5
-    } else if (currentHistogram < 0 && currentHistogram < previousHistogram) {
-      reasons.push('Increasing bearish momentum')
-      confidence -= 5
-    }
-
-    // MACD Divergence check
-    const priceChange = prices[prices.length - 1] - prices[prices.length - 5]
-    const macdChange = currentMACD - macd[macd.length - 5]
-    
-    if (priceChange > 0 && macdChange < 0) {
-      reasons.push('Bearish divergence detected')
-      confidence -= 15
-    } else if (priceChange < 0 && macdChange > 0) {
-      reasons.push('Bullish divergence detected')
-      confidence += 15
-    }
-  }
+function calculateVolumeProfile(prices: number[], volumes: number[]): {
+  volumeChange: number
+  volumeStrength: 'high' | 'normal' | 'low'
+} {
+  const avgVolume = volumes.slice(-10).reduce((sum, vol) => sum + vol, 0) / 10
+  const currentVolume = volumes[volumes.length - 1]
+  const volumeChange = ((currentVolume - avgVolume) / avgVolume) * 100
   
   return {
-    recommendation,
-    confidence,
-    reasons
+    volumeChange,
+    volumeStrength: 
+      volumeChange > 50 ? 'high' :
+      volumeChange < -50 ? 'low' : 'normal'
   }
 }
 
-// Helper function to determine RSI trend
+function calculateBollingerBands(prices: number[], period: number = 20, stdDev: number = 2) {
+  const sma = calculateMA(prices.slice(-period))
+  const variance = prices.slice(-period)
+    .reduce((sum, price) => sum + Math.pow(price - sma, 2), 0) / period
+  const std = Math.sqrt(variance)
+  
+  return {
+    upper: sma + (stdDev * std),
+    middle: sma,
+    lower: sma - (stdDev * std)
+  }
+}
+
 function calculateRSITrend(rsiValues: number[]): 'rising' | 'falling' | 'neutral' {
   if (rsiValues.length < 2) return 'neutral'
   

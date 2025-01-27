@@ -7,6 +7,7 @@ export interface StockData {
   historicalData: {
     timestamp: number
     price: number
+    volume: number
   }[]
 }
 
